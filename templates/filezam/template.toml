@@ -1,0 +1,29 @@
+id = "filezam"
+version = 1
+category = "storage"
+tags = ["files", "upload", "share"]
+docs = "https://github.com/miguelzamberlan/filezam"
+main = "filezam"
+name = { en = "Filezam", "pt-BR" = "Filezam" }
+description = { en = "Web file manager: a folder in the browser, with users, resumable uploads, public links and 2FA. Admin password generated; change it on the first login.", "pt-BR" = "Gestor de arquivos na web: uma pasta no navegador, com usuários, uploads com retomada, links públicos e 2FA. Senha do admin gerada; troque no primeiro acesso." }
+
+[variables.password]
+generate = "secret"
+
+[[exports]]
+key = "ADMIN_USER"
+value = "admin"
+
+[[exports]]
+key = "ADMIN_PASSWORD"
+value = "${password}"
+secret = true
+
+[[exports]]
+key = "URL"
+value = "http://${service}:8080"
+
+[[endpoints]]
+port = 8080
+label = { en = "Files", "pt-BR" = "Arquivos" }
+public = true

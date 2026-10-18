@@ -1,0 +1,35 @@
+services:
+  filezam:
+    # Static binary on distroless, non-root (uid 65532). The image makes its
+    # /data and /config mount points writable for that user, so named volumes
+    # work without a chown helper.
+    image: ghcr.io/miguelzamberlan/filezam:1.6
+    environment:
+      FILEZAM_ADMIN_USER: admin
+      FILEZAM_ADMIN_PASSWORD: ${password}
+      # Hangar's edge (Caddy) terminates HTTPS and is the only proxy in front.
+      FILEZAM_TRUSTED_PROXIES: 172.30.0.2
+      FILEZAM_SECURE_COOKIES: "true"
+    volumes:
+      - data:/data
+      - config:/config
+    expose:
+      - "8080"
+    healthcheck:
+      # The image's own check (distroless has no shell or curl).
+      test: ["CMD", "/filezam", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    read_only: true
+    cap_add: []
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "1"
+
+volumes:
+  data:
+  config:

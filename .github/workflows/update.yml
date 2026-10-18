@@ -77,4 +77,4 @@ jobs:
     with:
       ref: ${{ needs.update.outputs.sha }}
     secrets:
-      CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_SIGNING_KEY }}
+      HANGAR_CATALOG_KEY: ${{ secrets.HANGAR_CATALOG_KEY }}

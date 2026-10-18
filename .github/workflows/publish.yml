@@ -24,7 +24,7 @@ on:
         type: string
         required: true
     secrets:
-      CATALOG_SIGNING_KEY:
+      HANGAR_CATALOG_KEY:
         required: true
 
 permissions:
@@ -49,7 +49,7 @@ jobs:
         run: hangard template check templates/
       - name: Pack and sign
         env:
-          HANGAR_CATALOG_KEY: ${{ secrets.CATALOG_SIGNING_KEY }}
+          HANGAR_CATALOG_KEY: ${{ secrets.HANGAR_CATALOG_KEY }}
         run: hangard template pack templates/ -out dist
       - name: Skip if unchanged
         id: same

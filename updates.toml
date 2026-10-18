@@ -64,3 +64,7 @@ rule = "major"
 
 [templates.pgadmin]
 rule = "major"
+
+[templates.filezam]
+# Third-party app (github.com/miguelzamberlan/filezam): follow its 1.x line.
+rule = "minor"
