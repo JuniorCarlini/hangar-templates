@@ -1,0 +1,105 @@
+name: publish
+
+# Packs templates/ into catalog.tar.gz, signs it (catalog.tar.gz.sig) and
+# publishes a release marked "latest", so that
+# releases/latest/download/catalog.tar.gz(.sig) always point to the newest
+# signed catalog. The last 5 catalog releases are kept.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "templates/**"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Publish even if the catalog did not change
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to publish
+        type: string
+        required: true
+    secrets:
+      CATALOG_SIGNING_KEY:
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/hangard
+      - name: Check templates
+        run: hangard template check templates/
+      - name: Pack and sign
+        env:
+          HANGAR_CATALOG_KEY: ${{ secrets.CATALOG_SIGNING_KEY }}
+        run: hangard template pack templates/ -out dist
+      - name: Skip if unchanged
+        id: same
+        run: |
+          set -euo pipefail
+          mkdir -p prev
+          if [ "${{ inputs.force || false }}" != "true" ] &&
+             gh release download --repo "$GITHUB_REPOSITORY" --pattern catalog.tar.gz --dir prev 2>/dev/null &&
+             cmp -s prev/catalog.tar.gz dist/catalog.tar.gz; then
+            echo "The latest release already has this exact catalog."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Release
+        if: steps.same.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          tag="catalog-$(date -u +%Y%m%d-%H%M%S)"
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "Signed template catalog built from ${sha}."
+            echo
+            echo "| template | version | images |"
+            echo "|---|---|---|"
+            for d in templates/*/; do
+              id="$(basename "$d")"
+              v="$(sed -n 's/^version *= *\([0-9]*\).*/\1/p' "$d/template.toml" | head -1)"
+              imgs="$(sed -n 's/^ *image: *["'\'']\{0,1\}\([^"'\'' ]*\).*/\1/p' "$d/compose.yaml" | paste -sd ' ' -)"
+              echo "| ${id} | ${v} | \`${imgs}\` |"
+            done
+            echo
+            echo "sha256: \`$(sha256sum dist/catalog.tar.gz | cut -d' ' -f1)\`"
+          } > notes.md
+          # gh uploads the assets to a draft and publishes it afterwards, so
+          # latest/download never points to a release without its files.
+          gh release create "$tag" dist/catalog.tar.gz dist/catalog.tar.gz.sig \
+            --repo "$GITHUB_REPOSITORY" --target "$sha" --title "$tag" --notes-file notes.md --latest
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("catalog-"))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+            while read -r old; do
+              gh release delete "$old" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            done
+      - name: Check the published files
+        if: steps.same.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/$GITHUB_REPOSITORY/releases/latest/download"
+          for i in 1 2 3 4 5; do
+            curl -fsSL -o got.tar.gz "$base/catalog.tar.gz" && curl -fsSL -o got.sig "$base/catalog.tar.gz.sig" &&
+              cmp -s got.tar.gz dist/catalog.tar.gz && cmp -s got.sig dist/catalog.tar.gz.sig && { echo "latest/download serves the new catalog"; exit 0; }
+            sleep 10
+          done
+          echo "::error::releases/latest/download does not serve the new catalog"
+          exit 1

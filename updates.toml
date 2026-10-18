@@ -1,0 +1,66 @@
+# How far scripts/update_tags.py may move each template's image tags.
+#
+#   patch  same major.minor        18.1 -> 18.3
+#   minor  same major              4.3-management -> 4.4-management
+#   major  any newer version       9.18 -> 10.2
+#   keep   never touch
+#
+# The tag's shape is always kept: "18" only becomes another major-only tag,
+# "v1.55" keeps its "v", "2-rootless" stays "N-rootless". Only tags published
+# for linux/amd64 and linux/arm64 are used.
+#
+# Per template: rule (all of its images), images (a rule per image name,
+# overriding it) and stable_channel (a moving tag, like "latest", that marks
+# the newest stable release when the project also pushes plain version tags
+# for its betas).
+
+default = "minor"
+
+# Databases and queues: a new major changes the data format.
+[templates.postgres]
+rule = "minor"
+
+[templates.mariadb]
+rule = "minor"
+
+[templates.mongodb]
+rule = "minor"
+
+[templates.redis-cache]
+rule = "minor"
+
+[templates.redis-queue]
+rule = "minor"
+
+[templates.valkey-cache]
+rule = "minor"
+
+[templates.valkey-queue]
+rule = "minor"
+
+[templates.rabbitmq]
+rule = "minor"
+
+[templates.rustfs]
+rule = "minor"
+
+# A major needs a data migration (meilisearch: dump and import).
+[templates.meilisearch]
+rule = "minor"
+
+# n8n migrates its database on start, but a major can break workflows. Its
+# betas are plain version tags; "latest" is the stable one.
+[templates.n8n]
+rule = "minor"
+stable_channel = "latest"
+images = { postgres = "minor" }
+
+[templates.uptime-kuma]
+rule = "minor"
+
+# Stateless admin tools: any newer version is fine.
+[templates.adminer]
+rule = "major"
+
+[templates.pgadmin]
+rule = "major"

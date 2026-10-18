@@ -1,0 +1,25 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Updater unit tests
+        run: python3 -m unittest discover -s scripts -v
+      - uses: ./.github/actions/hangard
+      - name: Check templates (same rules as the panel)
+        run: hangard template check templates/

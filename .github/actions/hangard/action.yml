@@ -1,0 +1,18 @@
+name: Install hangard
+description: Download the newest hangard release (linux-amd64), check its SHA-256 against release.json and put it on PATH.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/hangard"
+        mkdir -p "$dir"
+        gh release download --repo JuniorCarlini/hangar --pattern hangard-linux-amd64 --pattern release.json --dir "$dir" --clobber
+        want="$(jq -r '.files["hangard-linux-amd64"]' "$dir/release.json")"
+        echo "$want  $dir/hangard-linux-amd64" | sha256sum -c -
+        install -m 0755 "$dir/hangard-linux-amd64" "$dir/hangard"
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "hangard $(jq -r .version "$dir/release.json")"

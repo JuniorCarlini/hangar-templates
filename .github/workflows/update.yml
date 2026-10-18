@@ -1,0 +1,80 @@
+name: update
+
+# Once a day, moves every template's image tags to the newest stable release
+# its rule in updates.toml allows, checks the result with hangard and commits
+# it to main. A commit made with GITHUB_TOKEN does not trigger other
+# workflows, so this one calls publish itself.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Updater unit tests
+        run: python3 -m unittest discover -s scripts
+      - name: Update image tags
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/update_tags.py --summary "$RUNNER_TEMP/changes.txt"
+      - uses: ./.github/actions/hangard
+      - name: Check templates
+        run: hangard template check templates/
+      - name: Commit
+        id: commit
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- templates/; then
+            echo "Nothing to update."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          n="$(wc -l < "$RUNNER_TEMP/changes.txt" | tr -d ' ')"
+          {
+            echo "chore(templates): bump ${n} image tag(s) to the newest stable releases"
+            echo
+            echo "The daily updater found newer stable tags allowed by updates.toml,"
+            echo "published for linux/amd64 and linux/arm64. Each changed template's"
+            echo "version goes up so panels prefer it over their embedded copy."
+            echo
+            sed 's/^/- /' "$RUNNER_TEMP/changes.txt"
+          } > "$RUNNER_TEMP/msg.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add templates/
+          git commit -q -F "$RUNNER_TEMP/msg.txt"
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/msg.txt" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: update
+    if: needs.update.outputs.changed == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      ref: ${{ needs.update.outputs.sha }}
+    secrets:
+      CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_SIGNING_KEY }}
