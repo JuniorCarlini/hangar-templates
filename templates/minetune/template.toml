@@ -1,0 +1,36 @@
+id = "minetune"
+version = 1
+category = "other"
+tags = ["minecraft", "game", "server", "backup"]
+docs = "https://juniorcarlini.github.io/minetune/"
+main = "minetune"
+min_hangar = "v0.5.13"
+name = { en = "Minetune", "pt-BR" = "Minetune" }
+description = { en = "Minecraft server with a web panel, per-nick passwords and encrypted backups, in one container. Needs about 6 GB of RAM. To play, open TCP port 25565 in the Ports tab.", "pt-BR" = "Servidor de Minecraft com painel web, senha por nick e backups criptografados, num container só. Precisa de uns 6 GB de RAM. Para jogar, abra a porta TCP 25565 na aba Portas." }
+
+[variables.panel_password]
+generate = "secret"
+
+[variables.session_secret]
+generate = "secret"
+
+[variables.rcon_password]
+generate = "secret"
+
+[variables.restic_password]
+generate = "secret"
+
+[[exports]]
+key = "PANEL_PASSWORD"
+value = "${panel_password}"
+secret = true
+
+[[exports]]
+key = "RESTIC_PASSWORD"
+value = "${restic_password}"
+secret = true
+
+[[endpoints]]
+port = 8080
+label = { en = "Panel", "pt-BR" = "Painel" }
+public = true

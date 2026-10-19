@@ -1,0 +1,38 @@
+services:
+  minetune:
+    # Server, gate, backup scheduler and web panel under one small supervisor,
+    # with no access to Docker (github.com/JuniorCarlini/minetune, "Um container só").
+    image: ghcr.io/juniorcarlini/minetune:0.4.0
+    environment:
+      PANEL_PASSWORD: ${panel_password}
+      PANEL_SESSION_SECRET: ${session_secret}
+      RCON_PASSWORD: ${rcon_password}
+      # Keep it outside the server too: backups cannot be restored without it.
+      RESTIC_PASSWORD: ${restic_password}
+    volumes:
+      - data:/data
+      - backups:/backups
+    # The panel; the game port (25565/tcp) is opened in the Ports tab.
+    expose:
+      - "8080"
+    healthcheck:
+      # The image's own check: the panel answers and the server is up (or still
+      # in its first boot, which downloads the server and builds the world).
+      test: ["CMD", "bash", "/minetune/bin/health.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
+    # Players are warned and the world is saved before it stops (up to 60 s).
+    stop_grace_period: 90s
+    # Fix the volumes' owner on first boot, then drop to the minecraft user.
+    cap_add: [CHOWN, SETUID, SETGID]
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: "2"
+
+volumes:
+  data:
+  backups:

@@ -68,3 +68,7 @@ rule = "major"
 [templates.filezam]
 # Third-party app (github.com/miguelzamberlan/filezam): follow its 1.x line.
 rule = "minor"
+
+[templates.minetune]
+# The owner's own project (github.com/JuniorCarlini/minetune): follow 0.x minors.
+rule = "minor"
