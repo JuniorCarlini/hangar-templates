@@ -1,6 +1,6 @@
 services:
   rabbitmq:
-    image: rabbitmq:4.3-management
+    image: rabbitmq:4.4-management
     environment:
       RABBITMQ_DEFAULT_USER: ${user}
       RABBITMQ_DEFAULT_PASS: ${password}

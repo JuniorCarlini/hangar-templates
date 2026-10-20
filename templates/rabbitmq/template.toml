@@ -1,5 +1,5 @@
 id = "rabbitmq"
-version = 2
+version = 3
 category = "queue"
 tags = ["amqp", "message-broker", "celery"]
 docs = "https://www.rabbitmq.com/docs"
