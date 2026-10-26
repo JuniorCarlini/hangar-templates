@@ -1,5 +1,5 @@
 id = "rustfs"
-version = 3
+version = 4
 category = "storage"
 tags = ["s3", "object-storage", "minio"]
 docs = "https://docs.rustfs.com/"
