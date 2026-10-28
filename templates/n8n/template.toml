@@ -1,5 +1,5 @@
 id = "n8n"
-version = 7
+version = 8
 category = "automation"
 tags = ["workflow", "automation", "low-code"]
 docs = "https://docs.n8n.io/hosting/"
