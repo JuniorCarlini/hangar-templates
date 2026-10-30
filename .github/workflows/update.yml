@@ -1,9 +1,11 @@
 name: update
 
 # Once a day, moves every template's image tags to the newest stable release
-# its rule in updates.toml allows, checks the result with hangard and commits
-# it to main. A commit made with GITHUB_TOKEN does not trigger other
-# workflows, so this one calls publish itself.
+# its rule in updates.toml allows, checks the result with hangard and opens
+# (or refreshes) a pull request with it. Nothing reaches main, and so
+# nothing is signed, before a person merges that pull request: an upstream
+# image tag is never trusted and signed by automation alone. The signing
+# key is not available to this workflow at all.
 
 on:
   schedule:
@@ -22,12 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      changed: ${{ steps.commit.outputs.changed }}
-      sha: ${{ steps.commit.outputs.sha }}
+      pull-requests: write
+    env:
+      BRANCH: bot/update-image-tags
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - name: Updater unit tests
@@ -40,41 +44,45 @@ jobs:
       - uses: ./.github/actions/hangard
       - name: Check templates
         run: hangard template check templates/
-      - name: Commit
-        id: commit
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if git diff --quiet -- templates/; then
             echo "Nothing to update."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           n="$(wc -l < "$RUNNER_TEMP/changes.txt" | tr -d ' ')"
+          title="chore(templates): bump ${n} image tag(s) to the newest stable releases"
           {
-            echo "chore(templates): bump ${n} image tag(s) to the newest stable releases"
+            echo "$title"
             echo
             echo "The daily updater found newer stable tags allowed by updates.toml,"
             echo "published for linux/amd64 and linux/arm64. Each changed template's"
-            echo "version goes up so panels prefer it over their embedded copy."
+            echo "version goes up so panels take the new images over their embedded"
+            echo "copy (panels only accept a tag or digest change for a template"
+            echo "they ship)."
             echo
             sed 's/^/- /' "$RUNNER_TEMP/changes.txt"
           } > "$RUNNER_TEMP/msg.txt"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
           git add templates/
           git commit -q -F "$RUNNER_TEMP/msg.txt"
-          git push origin HEAD:main
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # The token is used for this push only; checkout did not store it.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          {
+            tail -n +3 "$RUNNER_TEMP/msg.txt"
+            echo
+            echo "Review the new tags (release notes, breaking changes) before merging:"
+            echo "merging to main publishes and signs a new catalog."
+          } > "$RUNNER_TEMP/body.md"
+          if pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" && [ -n "$pr" ]; then
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated pull request #$pr"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
           cat "$RUNNER_TEMP/msg.txt" >> "$GITHUB_STEP_SUMMARY"
-
-  publish:
-    needs: update
-    if: needs.update.outputs.changed == 'true'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/publish.yml
-    with:
-      ref: ${{ needs.update.outputs.sha }}
-    secrets:
-      HANGAR_CATALOG_KEY: ${{ secrets.HANGAR_CATALOG_KEY }}

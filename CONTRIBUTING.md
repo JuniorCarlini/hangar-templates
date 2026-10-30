@@ -89,9 +89,10 @@ python3 -m unittest discover -s scripts
 
 ## Atualização automática das imagens
 
-Um bot atualiza as tags todo dia, dentro da regra do `updates.toml`. Ao
-adicionar um template, inclua uma entrada para ele (sem entrada, vale
-`minor`):
+Um bot propõe a troca das tags todo dia, num pull request, dentro da regra
+do `updates.toml`; revise as notas das imagens antes do merge, porque o merge
+publica e assina um catálogo novo. Ao adicionar um template, inclua uma
+entrada para ele (sem entrada, vale `minor`):
 
 ```toml
 [templates.meu-servico]
