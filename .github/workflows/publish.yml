@@ -1,9 +1,15 @@
 name: publish
 
 # Packs templates/ into catalog.tar.gz, signs it (catalog.tar.gz.sig) and
-# publishes a release marked "latest", so that
-# releases/latest/download/catalog.tar.gz(.sig) always point to the newest
-# signed catalog. The last 5 catalog releases are kept.
+# its metadata (catalog.tar.gz.meta + .meta.sig: a sequence number and an
+# expiry) and publishes a release marked "latest", so that
+# releases/latest/download/... always point to the newest signed catalog.
+# The last 5 catalog releases are kept.
+#
+# Only what is on main is signed: pushes to main (through reviewed pull
+# requests, including the daily tag bumps) and a weekly re-sign of the same
+# content, because panels refuse a catalog past its expiry. The signing key
+# lives in the "catalog" environment, which only main can use.
 
 on:
   push:
@@ -11,54 +17,69 @@ on:
     paths:
       - "templates/**"
       - ".github/workflows/publish.yml"
+      - ".github/actions/hangard/**"
+  schedule:
+    # Weekly, well inside the 30-day validity pack signs for.
+    - cron: "41 5 * * 1"
   workflow_dispatch:
     inputs:
       force:
         description: Publish even if the catalog did not change
         type: boolean
         default: false
-  workflow_call:
-    inputs:
-      ref:
-        description: Commit to publish
-        type: string
-        required: true
-    secrets:
-      HANGAR_CATALOG_KEY:
-        required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: publish
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Validation without the key.
+  check:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/hangard
       - name: Check templates
         run: hangard template check templates/
+
+  publish:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: catalog
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/hangard
       - name: Pack and sign
         env:
           HANGAR_CATALOG_KEY: ${{ secrets.HANGAR_CATALOG_KEY }}
         run: hangard template pack templates/ -out dist
       - name: Skip if unchanged
         id: same
+        env:
+          FORCE: ${{ inputs.force || false }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           mkdir -p prev
-          if [ "${{ inputs.force || false }}" != "true" ] &&
-             gh release download --repo "$GITHUB_REPOSITORY" --pattern catalog.tar.gz --dir prev 2>/dev/null &&
-             cmp -s prev/catalog.tar.gz dist/catalog.tar.gz; then
+          # The weekly run always publishes (fresh expiry). A push skips
+          # when the tarball is the same and the latest release already
+          # carries signed metadata (or this hangard cannot make it yet).
+          if [ "$FORCE" != "true" ] && [ "$EVENT" != "schedule" ] &&
+             gh release download --repo "$GITHUB_REPOSITORY" --pattern 'catalog.tar.gz*' --dir prev 2>/dev/null &&
+             cmp -s prev/catalog.tar.gz dist/catalog.tar.gz &&
+             { [ -f prev/catalog.tar.gz.meta ] || [ ! -f dist/catalog.tar.gz.meta ]; }; then
             echo "The latest release already has this exact catalog."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
@@ -68,6 +89,14 @@ jobs:
           set -euo pipefail
           tag="catalog-$(date -u +%Y%m%d-%H%M%S)"
           sha="$(git rev-parse HEAD)"
+          files=(dist/catalog.tar.gz dist/catalog.tar.gz.sig)
+          # Written by hangard versions with signed metadata (sequence and
+          # expiry); panels with that check require them.
+          if [ -f dist/catalog.tar.gz.meta ]; then
+            files+=(dist/catalog.tar.gz.meta dist/catalog.tar.gz.meta.sig)
+          else
+            echo "::warning::this hangard does not write catalog.tar.gz.meta; newer panels will refuse this catalog"
+          fi
           {
             echo "Signed template catalog built from ${sha}."
             echo
@@ -81,10 +110,14 @@ jobs:
             done
             echo
             echo "sha256: \`$(sha256sum dist/catalog.tar.gz | cut -d' ' -f1)\`"
+            if [ -f dist/catalog.tar.gz.meta ]; then
+              echo
+              echo "metadata: \`$(cat dist/catalog.tar.gz.meta)\`"
+            fi
           } > notes.md
           # gh uploads the assets to a draft and publishes it afterwards, so
           # latest/download never points to a release without its files.
-          gh release create "$tag" dist/catalog.tar.gz dist/catalog.tar.gz.sig \
+          gh release create "$tag" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" --target "$sha" --title "$tag" --notes-file notes.md --latest
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
             --jq '[.[] | select(.tagName | startswith("catalog-"))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
@@ -96,9 +129,21 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/$GITHUB_REPOSITORY/releases/latest/download"
-          for i in 1 2 3 4 5; do
-            curl -fsSL -o got.tar.gz "$base/catalog.tar.gz" && curl -fsSL -o got.sig "$base/catalog.tar.gz.sig" &&
-              cmp -s got.tar.gz dist/catalog.tar.gz && cmp -s got.sig dist/catalog.tar.gz.sig && { echo "latest/download serves the new catalog"; exit 0; }
+          names=(catalog.tar.gz catalog.tar.gz.sig)
+          [ -f dist/catalog.tar.gz.meta ] && names+=(catalog.tar.gz.meta catalog.tar.gz.meta.sig)
+          mkdir -p got
+          for _ in 1 2 3 4 5; do
+            ok=true
+            for n in "${names[@]}"; do
+              if ! curl -fsSL -o "got/$n" "$base/$n" || ! cmp -s "got/$n" "dist/$n"; then
+                ok=false
+                break
+              fi
+            done
+            if $ok; then
+              echo "latest/download serves the new catalog"
+              exit 0
+            fi
             sleep 10
           done
           echo "::error::releases/latest/download does not serve the new catalog"

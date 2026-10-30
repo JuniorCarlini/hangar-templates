@@ -1,18 +1,37 @@
 name: Install hangard
-description: Download the newest hangard release (linux-amd64), check its SHA-256 against release.json and put it on PATH.
+description: >-
+  Download the newest hangard release (linux-amd64), verify the Ed25519
+  signature of its release.json with the Hangar release public key, check
+  the binary's SHA-256 against it and put it on PATH.
 runs:
   using: composite
   steps:
     - shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        # Hangar's release public key (internal/release/release.go,
+        # PublicKeyHex). The hash in release.json is only worth something
+        # once the signature over release.json checks out with it: without
+        # this, whoever can change the release assets picks the binary
+        # that signs the catalog.
+        HANGAR_RELEASE_PUBLIC_KEY: 3c84b55c17438e93d4fd0a11dde9e88de3d00cf2bab5fad52589b841c6d49121
       run: |
         set -euo pipefail
         dir="$RUNNER_TEMP/hangard"
         mkdir -p "$dir"
-        gh release download --repo JuniorCarlini/hangar --pattern hangard-linux-amd64 --pattern release.json --dir "$dir" --clobber
-        want="$(jq -r '.files["hangard-linux-amd64"]' "$dir/release.json")"
-        echo "$want  $dir/hangard-linux-amd64" | sha256sum -c -
+        gh release download --repo JuniorCarlini/hangar \
+          --pattern hangard-linux-amd64 --pattern release.json --pattern release.json.sig \
+          --dir "$dir" --clobber
+        # Ed25519 public key as SubjectPublicKeyInfo (fixed 12-byte DER
+        # prefix + the 32-byte key), then a raw (no prehash) verification,
+        # exactly what the panel does.
+        printf '302a300506032b6570032100%s' "$HANGAR_RELEASE_PUBLIC_KEY" | xxd -r -p > "$dir/pub.der"
+        openssl pkey -pubin -inform DER -in "$dir/pub.der" -out "$dir/pub.pem"
+        tr -d '\n' < "$dir/release.json.sig" | base64 -d > "$dir/release.sig.bin"
+        openssl pkeyutl -verify -pubin -inkey "$dir/pub.pem" -rawin \
+          -in "$dir/release.json" -sigfile "$dir/release.sig.bin"
+        want="$(jq -er '.files["hangard-linux-amd64"]' "$dir/release.json")"
+        echo "$want  $dir/hangard-linux-amd64" | sha256sum --strict -c -
         install -m 0755 "$dir/hangard-linux-amd64" "$dir/hangard"
         echo "$dir" >> "$GITHUB_PATH"
-        echo "hangard $(jq -r .version "$dir/release.json")"
+        echo "hangard $(jq -r .version "$dir/release.json") (signature and hash verified)"

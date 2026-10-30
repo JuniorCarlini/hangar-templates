@@ -1,0 +1,16 @@
+# Actions are pinned by commit (the publish job holds the catalog signing
+# key, and a tag can be moved); this keeps those pins on the newest release.
+# Image tags in templates/ are handled by the update workflow instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/hangard
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
