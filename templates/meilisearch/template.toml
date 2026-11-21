@@ -1,5 +1,5 @@
 id = "meilisearch"
-version = 2
+version = 3
 category = "search"
 tags = ["full-text", "search-engine"]
 docs = "https://www.meilisearch.com/docs"
